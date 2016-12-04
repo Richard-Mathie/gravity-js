@@ -4,7 +4,7 @@ Gravity simulation using laplacian and FFT solver written in javascript, and win
 # Introduction
 Newtonain gravity can be solved by solving a gravitational field equation.
 
-![Gravitational Field equation](http://latex2png.com/output//latex_5c9170407345e3bc203303bbce359f0c.png)
+![Gravitational Field equation](http://latex2png.com/output//latex_9781037c37b2d51d9ab5c859e85f1787.png)
 
 this is a poisson equation which can be solved numerically using an FFT.
 
