@@ -27,3 +27,8 @@
 *.exe
 *.out
 *.app
+octave-workspace
+node_modules/
+kiss_fft130
+kiss_fft130.zip
+js-dsp-test/
