@@ -30,7 +30,7 @@ function poissonSolver(size) {
       weights[1] = 0
     })();
 
-    this.solve function(r){
+    this.solve = function(r){
       // r must be a Float32Array[size*size] real array 
       var R = fft.forward(ri);
       // multiply R by weights
@@ -52,7 +52,7 @@ function poissonSolver(size) {
       return fft.inverse(R);
     };
 
-};
+//};
 
 
 
@@ -77,7 +77,7 @@ function poissonSolver(size) {
     }
     context.putImageData(imageData, 0, 0);
 
-    }
+    //}
 
     //imageObj.src = 'http://www.html5canvastutorials.com/demos/assets/darth-vader.jpg';
 
@@ -86,7 +86,7 @@ function poissonSolver(size) {
     report("kissfftndr", start, middle, end, total);
 
     fft.dispose();
-}
+};
 
 //var can2 = document.createElement('canvas');
 //can2.width = w/2;
