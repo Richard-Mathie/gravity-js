@@ -1,5 +1,5 @@
 (function() {
-    var matrixSize = 128;
+    var matrixSize = 256;
     var a = new Array(matrixSize*matrixSize);
     var b = new Array(matrixSize*matrixSize);
     var c = new Array(matrixSize*matrixSize);
@@ -30,6 +30,22 @@
             sum += a[ip][this.thread.x];
         }
         return sum;
+    })
+    .setConstants({size: matrixSize})
+    .setOutput([matrixSize, matrixSize]);
+
+    const laplace_relaxation = gpu.createKernel(function(s, a) {
+        var sum = 0;
+        var ip;
+        for (var i=0; i<2; i++) {
+            ip = (this.thread.x + i*2 - 1) % this.constants.size;
+            sum += a[this.thread.y][ip];
+        }
+        for (var i=0; i<2; i++) {
+            ip = (this.thread.y + i*2 - 1) % this.constants.size;
+            sum += a[ip][this.thread.x];
+        }
+        return (1-s) * a[this.thread.y][this.thread.x] + s*0.25*sum;
     })
     .setConstants({size: matrixSize})
     .setOutput([matrixSize, matrixSize]);
@@ -101,7 +117,8 @@
     function animate() {
         //for(var i=0; i<10; i++){
             //phi = laplace_relaxation(phi);
-            phi = add(phi, scale(0.24, laplace(phi)));
+            //phi = add(phi, scale(0.24, laplace(phi)));
+            phi = laplace_relaxation(0.9, phi)
         //};
         var sum = sum_row(phi)
         console.log(sum.reduce(function(a,c){return a+c;}));
