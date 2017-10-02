@@ -1,32 +1,41 @@
 (function() {
-    var matrixSize = 256;
+    var matrixSize =  512;
     var a = new Array(matrixSize*matrixSize);
     var b = new Array(matrixSize*matrixSize);
     var c = new Array(matrixSize*matrixSize);
-    a = splitArray(fillArrayRandom(a), matrixSize);
+    a = splitArray(fillArrayZero(a), matrixSize);
     b = splitArray(fillArrayRandom(b), matrixSize);
+    //b[128-64][128-64] = 128;
+    //b[128+64][128+64] = -128;
     c = splitArray(fillArrayRandom(c), matrixSize);
     var d = c
-    console.log(a);
+    //console.log(a);
 
     const gpu = new GPU({ mode: 'gpu' });
+    const cpu = new GPU({ mode: 'cpu' });
 
     var opts_1d =  {constants: {size: matrixSize},
                     output: [matrixSize] };
     var opts_2d =  {constants: {size: matrixSize},
                     output: [matrixSize, matrixSize] };
 
+    function mod(n, m) {
+        return ((n % m) + m) % m;
+    }
+
+    cpu.addFunction(mod)
+
     // Laplace Transform
     // aij+1 + aij-1 + ai+1j + ai-1j - 4 aij
-    const laplace = gpu.createKernel(function(a) {
+    const laplace = cpu.createKernel(function(a) {
         var sum = -4 * a[this.thread.y][this.thread.x];
         var ip;
         for (var i=0; i<2; i++) {
-            ip = (this.thread.x + i*2 - 1) % this.constants.size;
+            ip = mod(this.thread.x + i*2 - 1, this.constants.size);
             sum += a[this.thread.y][ip];
         }
         for (var i=0; i<2; i++) {
-            ip = (this.thread.y + i*2 - 1) % this.constants.size;
+            ip = mod(this.thread.y + i*2 - 1, this.constants.size);
             sum += a[ip][this.thread.x];
         }
         return sum;
@@ -34,20 +43,25 @@
     .setConstants({size: matrixSize})
     .setOutput([matrixSize, matrixSize]);
 
-    const laplace_relaxation = gpu.createKernel(function(s, a) {
-        var sum = 0;
+    var s = 1;
+    var dh = 1;
+    var dh2 = dh * dh;
+
+    const laplace_relaxation = cpu.createKernel(function(a, rho) {
+        var sum = - rho[this.thread.y][this.thread.x] * this.constants.dh2;
         var ip;
+        var s = this.constants.s;
         for (var i=0; i<2; i++) {
-            ip = (this.thread.x + i*2 - 1) % this.constants.size;
+            ip = mod(this.thread.x + i*2 - 1, this.constants.size);
             sum += a[this.thread.y][ip];
         }
         for (var i=0; i<2; i++) {
-            ip = (this.thread.y + i*2 - 1) % this.constants.size;
+            ip = mod(this.thread.y + i*2 - 1, this.constants.size);
             sum += a[ip][this.thread.x];
         }
-        return (1-s) * a[this.thread.y][this.thread.x] + s*0.25*sum;
+        return ((1-s) * a[this.thread.y][this.thread.x]) + ( s*0.25*sum );
     })
-    .setConstants({size: matrixSize})
+    .setConstants({size: matrixSize, s: s, dh2: dh2})
     .setOutput([matrixSize, matrixSize]);
     //.setFloatTextures(true);
 
@@ -107,23 +121,36 @@
     //ctx.scale(10, 3);
 
     var phi = a;
+    var rho = b;
 
     //laplace_relaxation = gpu.combineKernels(laplace, scale, add, function(a) {
 	//    return add(a, scale(0.1, laplace(a)));
 	//});
 
     //laplace_relaxation.setOutputToTexture(true);
-    
+    var old_time = +new Date();
+    var time;
+    var start;
+
     function animate() {
+        start = + new Date();
         //for(var i=0; i<10; i++){
             //phi = laplace_relaxation(phi);
             //phi = add(phi, scale(0.24, laplace(phi)));
-            phi = laplace_relaxation(0.9, phi)
+            phi = laplace_relaxation(phi, rho)
+            var m2 = matrixSize/2,
+                m4 = matrixSize/4;
+            phi[m2-m4][m2-m4] = 300;
+            phi[m2+m4][m2+m4] = -300;
         //};
-        var sum = sum_row(phi)
-        console.log(sum.reduce(function(a,c){return a+c;}));
+        //var sum = sum_row(phi)
+        //console.log(sum.reduce(function(a,c){return a+c;}));
         render(phi);
-        window.requestAnimationFrame(animate)
+        time = + new Date();
+        console.log( parseFloat(1000/(time - old_time)).toFixed(1) + " fps");
+        console.log( parseFloat(1000/(time - start)).toFixed(1) + " anim");
+        old_time = time;
+        window.requestAnimationFrame(animate);
     }
 
     window.requestAnimationFrame(animate)
@@ -131,7 +158,14 @@
 
     function fillArrayRandom(array) {
         for(var i = 0; i < array.length; i++) {
-          array[i] = Math.random();
+          array[i] = Math.random()/2 -0.25;
+        }
+        return array;
+    }
+
+    function fillArrayZero(array) {
+        for(var i = 0; i < array.length; i++) {
+          array[i] = 0
         }
         return array;
     }
