@@ -1,10 +1,18 @@
 (function() {
-    var matrixSize =  512;
+    var matrixSize =  4; //512;
     var a = new Array(matrixSize*matrixSize);
     var b = new Array(matrixSize*matrixSize);
     var c = new Array(matrixSize*matrixSize);
-    a = splitArray(fillArrayZero(a), matrixSize);
-    b = splitArray(fillArrayRandom(b), matrixSize);
+    a = [[0, 0, 0, 0],
+         [0, 0, 0, 0],
+         [0, 0, 0, 0],
+         [0, 0, 0, 0]];
+    b = [[0, 0, 0, 0],
+         [0, 0, 0, 0],
+         [0, 1, 0, 0],
+         [0, 0, 0, 0]];
+    //a = splitArray(fillArrayZero(a), matrixSize);
+    //b = splitArray(fillArrayRandom(b), matrixSize);
     //b[128-64][128-64] = 128;
     //b[128+64][128+64] = -128;
     c = splitArray(fillArrayRandom(c), matrixSize);
@@ -14,16 +22,16 @@
     const gpu = new GPU({ mode: 'gpu' });
     const cpu = new GPU({ mode: 'cpu' });
 
-    var opts_1d =  {constants: {size: matrixSize},
-                    output: [matrixSize] };
-    var opts_2d =  {constants: {size: matrixSize},
-                    output: [matrixSize, matrixSize] };
-
     function mod(n, m) {
         return ((n % m) + m) % m;
     }
 
     cpu.addFunction(mod)
+
+    var opts_1d =  {constants: {size: matrixSize},
+                    output: [matrixSize] };
+    var opts_2d =  {constants: {size: matrixSize},
+                    output: [matrixSize, matrixSize] };
 
     // Laplace Transform
     // aij+1 + aij-1 + ai+1j + ai-1j - 4 aij
@@ -47,7 +55,19 @@
     var dh = 1;
     var dh2 = dh * dh;
 
-    const laplace_relaxation = cpu.createKernel(function(a, rho) {
+    const laptest = gpu.createKernel(function(a) {
+        var sum = 0;
+        sum += a[this.thread.y][mod(this.thread.x - 1, this.constants.size)];
+        sum += a[this.thread.y][mod(this.thread.x + 1, this.constants.size)];
+        sum += a[mod(this.thread.y - 1, this.constants.size)][this.thread.x];
+        sum += a[mod(this.thread.y + 1, this.constants.size)][this.thread.x];
+        //sum += a[this.thread.y][this.thread.x]
+        return sum;
+    })
+    .setConstants({size: matrixSize})
+    .setOutput([matrixSize, matrixSize])
+
+    const laplace_relaxation = gpu.createKernel(function(a, rho) {
         var sum = - rho[this.thread.y][this.thread.x] * this.constants.dh2;
         var ip;
         var s = this.constants.s;
@@ -62,8 +82,9 @@
         return ((1-s) * a[this.thread.y][this.thread.x]) + ( s*0.25*sum );
     })
     .setConstants({size: matrixSize, s: s, dh2: dh2})
-    .setOutput([matrixSize, matrixSize]);
+    .setOutput([matrixSize, matrixSize])
     //.setFloatTextures(true);
+    .setOutputToTexture(true);
 
     const add = gpu.createKernel(function(a, b) {
 	    return a[this.thread.y][this.thread.x] + b[this.thread.y][this.thread.x];
@@ -140,12 +161,12 @@
             phi = laplace_relaxation(phi, rho)
             var m2 = matrixSize/2,
                 m4 = matrixSize/4;
-            phi[m2-m4][m2-m4] = 300;
-            phi[m2+m4][m2+m4] = -300;
+            //phi[m2-m4][m2-m4] = 300;
+            //phi[m2+m4][m2+m4] = -300;
         //};
         //var sum = sum_row(phi)
         //console.log(sum.reduce(function(a,c){return a+c;}));
-        render(phi);
+        render(phi.toArray(gpu));
         time = + new Date();
         console.log( parseFloat(1000/(time - old_time)).toFixed(1) + " fps");
         console.log( parseFloat(1000/(time - start)).toFixed(1) + " anim");
