@@ -7,7 +7,7 @@
     a = splitArray(fillArrayZero(a), matrixSize);
     b = splitArray(fillArrayZero(b), matrixSize);
     b[128-64][128-64] = 16.9;
-    b[128+64][128+64] = -16.9;
+    b[128-64][128+64] = -16.9;
     c = splitArray(fillArrayRandom(c), matrixSize);
     var d = c
     var phi = a;
@@ -86,12 +86,12 @@
         var dhs = dh*matrixSize/gridSize;
         var dhs2 = dhs ** 2;
         var phi = new Array(gridSize*gridSize);
-        phi = splitArray(fillArrayZero(phi), matrixSize);
+        phi = splitArray(fillArrayZero(phi), gridSize);
 
         const decimate = gpu.createKernel(function(a) {
             var ix = this.thread.x*2;
             var iy = this.thread.y*2;
-            return 0.25* (a[ix][iy] + a[ix+1][iy] + a[ix][iy+1] + a[ix+1][iy+1])
+            return 0.25* (a[iy][ix] + a[iy+1][ix] + a[iy][ix+1] + a[iy+1][ix+1]);
         })
         .setOutput([gridSize/2, gridSize/2])
         .setOutputToTexture(true);
@@ -252,21 +252,63 @@
         }
     }
 
+    /* ======== Multi-Grid Loop ========== */
+
+    function MultiGrid2(){
+        // Coarsen
+        for (var i=0, m=levels.length - 1; i < m; i++){
+            levels[i+1].rho = levels[i].decimate(levels[i].rho);
+        }
+
+        // Solve Top level 2x2 grid
+        var level = levels[levels.length-1];
+        var phi = mat_mult(Apinv, [].concat.apply([], level.rho.toArray(gpu)));
+        // Correct zero
+        var phi_sum=0;
+        for (var i=phi.length; i--;) {
+          phi_sum+=phi[i];
+        }
+        phi_sum = phi_sum/phi.length
+        for (var i=phi.length; i--;) {
+          phi[i] -= phi_sum;
+        }
+        level.phi = splitArray(phi, 2)
+
+        // Smooth
+        for (var i=levels.length-2; i >= 0; i--){
+            var level = levels[i];
+            var phi = level.interpolate(levels[i+1].phi);  // interpolation
+            for (var step=10;step--;){
+                phi = level.laplace_relaxation(phi, level.rho);
+            };
+            level.phi_sum = level.sum2(phi);
+            level.phi = level.offset(phi, [-level.phi_sum / level.gridSize ** 2]);
+            level.r = level.laplace_residual(level.phi, level.rho);
+        }
+    }
+
     level = levels[0]
     // render(level.phi)
     // render(level.laplace_residual(level.phi, level.rho))
+    const to_texture = gpu.createKernel(function(a){
+      return a[this.thread.y][this.thread.x]}
+    )
+    .setOutput([512,512])
+    .setOutputToTexture(true);
 
     var old_time = +new Date();
     var time;
     var start;
 
+    //MultiGrid2()
+
     function animate() {
         start = + new Date();
-        //MultiGrid()
+
         level.phi = level.laplace_relaxation(level.phi, level.rho);
         var phi_sum = level.sum2(level.phi);
         level.phi = level.offset(level.phi, [-phi_sum / level.gridSize ** 2]);
-        console.log(phi_sum);
+        console.log(level.phi_sum);
         render(level.phi);
         time = + new Date();
         console.log( parseFloat(1000/(time - old_time)).toFixed(1) + " fps");
