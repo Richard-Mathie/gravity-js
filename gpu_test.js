@@ -5,9 +5,9 @@
     var c = new Array(matrixSize*matrixSize);
 
     a = splitArray(fillArrayZero(a), matrixSize);
-    b = splitArray(fillArrayZero(b), matrixSize);
-    b[128-64][128-64] = 16.9;
-    b[128-64][128+64] = -16.9;
+    b = splitArray(fillArrayRandom(b), matrixSize);
+    b[matrixSize/4-matrixSize/8][matrixSize/4-matrixSize/8] = 3.9;
+    b[matrixSize/4+matrixSize/8][matrixSize/4+matrixSize/8] = -3.9;
     c = splitArray(fillArrayRandom(c), matrixSize);
     var d = c
     var phi = a;
@@ -97,12 +97,10 @@
         .setOutputToTexture(true);
 
         const interpolate2 = gpu.createKernel(function(f){
-             const tsize = this.constants.size;
              var ix = floor(this.thread.x*0.5);
              var iy = floor(this.thread.y*0.5);
              return f[iy][ix]
         })
-        .setConstants({size: gridSize/2})
         .setOutput([gridSize, gridSize])
         .setOutputToTexture(true);
 
@@ -161,7 +159,6 @@
 
         laplace_relaxation: gpu.createKernel(function(a, rho) {
             var sum = - rho[this.thread.y][this.thread.x] * this.constants.dh2;
-            var ip;
             var s = this.constants.s;
             sum += a[this.thread.y][mod(this.thread.x - 1, this.constants.size)];
             sum += a[this.thread.y][mod(this.thread.x + 1, this.constants.size)];
@@ -181,21 +178,21 @@
             sum += a[mod(this.thread.y + 1, this.constants.size)][this.thread.x];
             return rho[this.thread.y][this.thread.x] - sum * this.constants.dhm2;
         })
-        .setConstants({size: matrixSize, dhm2: 1/dhs2})
-        .setOutput([matrixSize, matrixSize])
+        .setConstants({size: gridSize, dhm2: 1/dhs2})
+        .setOutput([gridSize, gridSize])
         .setOutputToTexture(true),
 
         add: gpu.createKernel(function(a, b){
             return a[this.thread.y][this.thread.x] + b[this.thread.y][this.thread.x];
         })
-        .setOutput([matrixSize, matrixSize])
+        .setOutput([gridSize, gridSize])
         .setOutputToTexture(true),
 
 
         offset: gpu.createKernel(function(a, b){
             return a[this.thread.y][this.thread.x] + b[0];
         })
-        .setOutput([matrixSize, matrixSize])
+        .setOutput([gridSize, gridSize])
         .setOutputToTexture(true)
         }
     };
@@ -210,15 +207,19 @@
 
     /* ======== Multi-Grid Loop ========== */
 
+    var a1 = 2;
+    var a2 = 2;
+
     function MultiGrid(){
         // Coarsen
         for (var i=0, m=levels.length - 1; i < m; i++){
             var level = levels[i]
-            for (var step=10;step--;){
+            for (var step=a1; step--;){
                 var phi = level.laplace_relaxation(level.phi, level.rho);
             }
             var phi_mean = level.sum2(phi) / level.gridSize ** 2;
             phi = level.offset(phi, [-phi_mean]);
+
             var r = level.laplace_residual(phi, level.rho);
             levels[i+1].rho = level.decimate(r);
             level.r = r;
@@ -243,10 +244,10 @@
         for (var i=levels.length-2; i >= 0; i--){
             var level = levels[i]
             var error = level.interpolate(levels[i+1].phi);  // interpolation
-            var phi = level.add(error, level.phi);             // correction
-            for (var step=10;step--;){
+            var phi = level.add(error, level.phi);           // correction
+            for (var step=a2+i*3; step--;){
                 phi = level.laplace_relaxation(phi, level.rho);
-            };
+            }
             var phi_mean = level.sum2(phi) / level.gridSize ** 2;
             level.phi = level.offset(phi, [-phi_mean]);
         }
@@ -277,13 +278,13 @@
         // Smooth
         for (var i=levels.length-2; i >= 0; i--){
             var level = levels[i];
-            var phi = level.interpolate(levels[i+1].phi);  // interpolation
-            for (var step=10;step--;){
-                phi = level.laplace_relaxation(phi, level.rho);
+            var phi = level.interpolate2(levels[i+1].phi);  // interpolation
+            for (var step=100;step--;){
+               phi = level.laplace_relaxation(phi, level.rho);
             };
             level.phi_sum = level.sum2(phi);
             level.phi = level.offset(phi, [-level.phi_sum / level.gridSize ** 2]);
-            level.r = level.laplace_residual(level.phi, level.rho);
+            // level.r = level.laplace_residual(level.phi, level.rho);
         }
     }
 
@@ -293,22 +294,38 @@
     const to_texture = gpu.createKernel(function(a){
       return a[this.thread.y][this.thread.x]}
     )
-    .setOutput([512,512])
+    .setOutput([matrixSize, matrixSize])
+    .setOutputToTexture(true);
+
+    const square = gpu.createKernel(function(a){
+        return pow(a[this.thread.y][this.thread.x], 2) ;
+    })
+    .setOutput([matrixSize, matrixSize])
     .setOutputToTexture(true);
 
     var old_time = +new Date();
     var time;
     var start;
 
-    //MultiGrid2()
+    MultiGrid()
+
+    var frame = 0;
 
     function animate() {
         start = + new Date();
-
+        if (frame % 10 == 0){
+            MultiGrid()
+        }
+        if(false){
+            level.rho = splitArray(fillArrayZero(new Array(512*512)), matrixSize);
+        }
+        frame ++;
         level.phi = level.laplace_relaxation(level.phi, level.rho);
-        var phi_sum = level.sum2(level.phi);
-        level.phi = level.offset(level.phi, [-phi_sum / level.gridSize ** 2]);
-        console.log(level.phi_sum);
+        //var phi_sum = level.sum2(level.phi);
+        //level.phi = level.offset(level.phi, [-phi_sum / level.gridSize ** 2]);
+        level.r = level.laplace_residual(level.phi, level.rho)
+        console.log(level.sum2(square(level.r)));
+        //console.log(phi_sum)
         render(level.phi);
         time = + new Date();
         console.log( parseFloat(1000/(time - old_time)).toFixed(1) + " fps");
